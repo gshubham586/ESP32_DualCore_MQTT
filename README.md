@@ -1,1 +1,1 @@
-# ESP8266_DualCore_MQTT
+# ESP32_DualCore_MQTT
