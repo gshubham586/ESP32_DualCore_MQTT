@@ -1,24 +1,36 @@
 /*
- * To be done: Add I2C/SPI sensor, Add analo sensor, Add digital sensor
- * Give command over I2C,SPI etc.
- * Message format for digitla pin on/off, node_1/a/, message 1/1,1/0
- * Message format for digitla pin on/off, node_1/d/, message1/analog value
+ * Created by : SHUBHAM GUPTA
+ * Message format for digitla pin on/off, node_1/d/, message : 1/1,1/0 or 2/1, 2/0 if using 2nd DO pin and so on.
+ * Message format for analog pin o/p (pwm) , node_1/a/, message : 1/analog value (analog value range 0 to 255)
+ * Published message : D or A then Pin (1,2...) then Value (0 or 1 in case of Digital, else analog value). Eg. D:1/1 or A:1/655
+ * 
+ * Fill parameter which are commented "####"
  */
 
 
 
+/*
+ * INPUT ONLY PINS GPIOs (34, 35, 36, 39)
+ * I2C (SDA : 21, SCL : 22)
+ * 
+ */
+
+ 
 #include <PubSubClient.h>
 #include <WiFi.h>
 
-#define RELAY_1_PIN 19 // D19           Relay 1 pin
-#define RELAY_2_PIN 18 // D18           Relay 2 pin
-#define RELAY_3_PIN 17 // TX2           Realy 3 pin
-#define RELAY_4_PIN 16 // RX2           Relay 4 Pin
-#define ANALOG_1_PIN  34 // D34         PWM pin 
-#define DIGITAL_VALUE_PIN 35 // D35     Digital Input Pin
-#define PWM1_FREQ 1000                  // PWM frequency of PWM pin
-#define PWM1_RES 8                      // PWM resolution (2^8 bit)
-#define PWM1_CH 0                       // PWM channnel 0
+#define RELAY_1_PIN 19                // Relay 1 pin
+#define RELAY_2_PIN 18                // Relay 2 pin
+#define RELAY_3_PIN 17                // Realy 3 pin
+#define RELAY_4_PIN 16                // Relay 4 Pin
+#define ANALOG_1_PIN  23              // PWM pin 
+#define DIGITAL_INPUT_PIN_1 35        // Digital Input Pin
+#define ANALOG_INPUT_PIN_1 34         // Digital Input Pin
+#define PWM1_FREQ 5000                // PWM frequency of PWM pin
+#define PWM1_RES 8                    // PWM resolution (2^8 bit)
+#define PWM1_CH 0                     // PWM channnel 0
+#define DIGITAL_INPUT1_READ_FREQ   30000
+#define ANALOG_INPUT1_READ_FREQ    60000
 
 volatile uint8_t RELAY_1_PIN_STATE = HIGH;      // Initial state of Realy 1 pin
 volatile uint8_t RELAY_2_PIN_STATE = HIGH;      // Initial state of Realy 2 pin
@@ -33,12 +45,12 @@ volatile uint8_t WIFI_SETUP_COMPLETE = 0;       // Flag enabled when Wi-Fi setup
 
 ////////////////// MQTT Parameters /////////////////
 
-char wifi_ssid[32] = "SSID";               // Wi-Fi SSID
-char wifi_passwd[20] = "PASSWORD";            // Wi-Fi password
-int server_port = 1883;                        // MQTT port
-char mqtt_server_ip[16] = "mqt_broker_ip_address";     // ip address of mqtt broker
-char mqtt_username[32] = "mqtt username";               // mqtt broker username
-char mqtt_password[32] = "paaword";          // mqtt broker password
+char wifi_ssid[50] = "SSID";                          // Wi-Fi SSID                    "####"
+char wifi_passwd[50] = "Wi-Fi password";              // Wi-Fi password                "####"
+int server_port = 1883;                               // MQTT port                     "####"
+char mqtt_server_ip[30] = "mqtt broker ip address";   // ip address of mqtt broker     "####"
+char mqtt_username[32] = "username";                  // mqtt broker username          "####"
+char mqtt_password[32] = "password";                  // mqtt broker password          "####"
 char device_name[20] = "node_1";               // device name (Custom name for ESP32, Must be unique if more than 1 nodes are being used in mqtt)
 const char sub_topic_1[20] = "node_1/a/";      // Topic 1 to subscribe. You can subscribe multiple topic at a time
 const char sub_topic_2[20] = "node_1/d/";      // Topic 2 to subscribe. You can subscribe multiple topic at a time
@@ -47,7 +59,9 @@ char dataPublish[150];                         // Variable to store data to be p
 int qos_level = 1; // 0 or 1                   // QoS level of published message
 String sub_message = "";                       // Variable to store subscribed message
 String pub_message = "";                       // Variable to store message that is to be published
-
+unsigned long current_time = 0;
+unsigned long digital_pin_previous_time = 0;
+unsigned long analog_pin_previous_time = 0;
 TaskHandle_t Task1;
 TaskHandle_t Task2;
 
@@ -131,11 +145,12 @@ void setup() {
   pinMode(RELAY_2_PIN, OUTPUT);
   pinMode(RELAY_3_PIN, OUTPUT);
   pinMode(RELAY_4_PIN, OUTPUT);
-  pinMode(DIGITAL_VALUE_PIN, INPUT);
+  pinMode(DIGITAL_INPUT_PIN_1, INPUT);
   pinMode(LED_BUILTIN, OUTPUT);
 
-  ledcAttachPin(ANALOG_1_PIN, PWM1_CH);
   ledcSetup(PWM1_CH, PWM1_FREQ, PWM1_RES);
+  ledcAttachPin(ANALOG_1_PIN, PWM1_CH);
+  
 
   digitalWrite(RELAY_1_PIN, RELAY_1_PIN_STATE);
   digitalWrite(RELAY_2_PIN, RELAY_2_PIN_STATE);
@@ -171,6 +186,7 @@ void Task1code( void * pvParameters )
     // If wi-fi is setup successfully in core 1
     if(WIFI_SETUP_COMPLETE)
     {
+      current_time = millis();
       // If message for analog (pwm) pin is arrived arrived
       if(A_MESSAGE_ARRIVED)
       {
@@ -209,25 +225,25 @@ void Task1code( void * pvParameters )
         switch(atoi(sub_message.substring(0,1).c_str()))
         {
           case 1:
-            digitalWrite(RELAY_1_PIN, NEW_PIN_STATE);
+            digitalWrite(RELAY_1_PIN, NEW_PIN_STATE);           // Change Relay 1 state
             pub_message = "RELAY_1:" + String(state);
             MESSAGE_TO_BE_SENT = 1;
             break;
             
           case 2:
-            digitalWrite(RELAY_2_PIN, NEW_PIN_STATE);
+            digitalWrite(RELAY_2_PIN, NEW_PIN_STATE);          // Change Relay 2 state
             pub_message = "RELAY_2:" + String(state);
             MESSAGE_TO_BE_SENT = 1;
             break;
             
           case 3:
-            digitalWrite(RELAY_3_PIN, NEW_PIN_STATE);
+            digitalWrite(RELAY_3_PIN, NEW_PIN_STATE);          // Change Relay 3 state
             pub_message = "RELAY_3:" + String(state);
             MESSAGE_TO_BE_SENT = 1;
             break;
 
           case 4:
-            digitalWrite(RELAY_4_PIN, NEW_PIN_STATE);
+            digitalWrite(RELAY_4_PIN, NEW_PIN_STATE);         // Change Relay 4 state
             pub_message = "RELAY_4:" + String(state);
             MESSAGE_TO_BE_SENT = 1;
             break;
@@ -236,6 +252,18 @@ void Task1code( void * pvParameters )
           pub_message = "Error_message";
           MESSAGE_TO_BE_SENT = 1;          // Send ACK
         }
+    }
+    // Raed digital input pin at every "DIGITAL_INPUT1_READ_FREQ" millisec.
+    if((current_time - digital_pin_previous_time)>DIGITAL_INPUT1_READ_FREQ)
+    {
+      pub_message = "D:1/" + String(digital_sensor());
+      MESSAGE_TO_BE_SENT = 1;
+    }
+    // Raed analog input pin at every "ANALOG_INPUT1_READ_FREQ" millisec.
+    if((current_time - analog_pin_previous_time)>ANALOG_INPUT1_READ_FREQ)
+    {
+      pub_message = "A:1/" + String(analog_sensor());
+      MESSAGE_TO_BE_SENT = 1;
     }
     vTaskDelay(1);
   }
@@ -253,10 +281,10 @@ void Task2code( void * pvParameters )
       Serial.print("Connecting to ");
       Serial.println(wifi_ssid);
       
-      WiFi.begin(wifi_ssid, wifi_passwd);
+      WiFi.begin(wifi_ssid, wifi_passwd);    // Start wi-fi and connect with given credential
       while (WiFi.status() != WL_CONNECTED) 
       { 
-        digitalWrite(LED_BUILTIN, HIGH);                
+        digitalWrite(LED_BUILTIN, HIGH);                // Blink LED until MCU connect to wi-fi         
         delay(500);
         Serial.print(".");
         digitalWrite(LED_BUILTIN, LOW); 
@@ -264,8 +292,8 @@ void Task2code( void * pvParameters )
      Serial.println("");
      Serial.print("WiFi connected - ESP IP address is: ");
      Serial.println(WiFi.localIP());
-     client.setServer(mqtt_server_ip,server_port);
-     client.setCallback(callback);
+     client.setServer(mqtt_server_ip,server_port);       // Conncet to mqtt broker
+     client.setCallback(callback);                       // Set callback function
      WIFI_SETUP_COMPLETE = 1;
    }
    else if(WiFi.status() == WL_CONNECTED)
@@ -285,11 +313,15 @@ void Task2code( void * pvParameters )
    } 
  }
 
-
-
+// Read state of digital input sensor
 int digital_sensor()
 {
-  return digitalRead(DIGITAL_VALUE_PIN);
+  return digitalRead(DIGITAL_INPUT_PIN_1);
+}
+// Read state of analog input sensor
+int analog_sensor()
+{
+  return analogRead(ANALOG_INPUT_PIN_1);
 }
 
 void loop() 
